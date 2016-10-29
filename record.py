@@ -2,7 +2,7 @@
 import pyaudio
 import wave
 import numpy as np
-from tuner import BandPassFilter
+from tuner import Tuner
 
 
 def decode(in_data, channels):
@@ -39,7 +39,7 @@ def encode(signal):
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 2
-RATE = 44100
+RATE = 8000
 CHUNK = 1024
 RECORD_SECONDS = 2
 WAVE_OUTPUT_FILENAME = "file.wav"
@@ -53,12 +53,13 @@ stream = audio.open(format=FORMAT, channels=CHANNELS,
 print("recording...")
 frames = []
 
-bp = BandPassFilter(sampleRate=RATE)
+t = Tuner(sampleRate=RATE,startFreq=50,stopFreq=1200)
 
 for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
     data = stream.read(CHUNK)
     data_d = decode(data, CHANNELS)
-    data_d = bp.filter(data_d[:,0])
+    data_d[:,0] = t.run(data_d[:,0])
+    data_d[:,1] = np.zeros((CHUNK,),dtype=np.int16)
     data_e = encode(data_d)
     frames.append(data_e)
 print("finished recording")
