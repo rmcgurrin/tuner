@@ -44,6 +44,8 @@ class Tuner:
         self.sampleRate = sampleRate
         self.fftLen = fftLen
         self.bp = BandPassFilter(sampleRate=8000,startFreq=50,stopFreq=1200)
+        self.peak = 0.0;
+        self.avgCoeff = 1.
 
     def run(self, x):
 
@@ -58,9 +60,10 @@ class Tuner:
         fundamental = np.argmax(PxxH)
 
         # estimate the peak frequency
-        peakLoc = self.interpPeak(Pxx,fundamental)
+        peakLoc, power = self.interpPeak(Pxx,fundamental)
+        self.peak = self.avgCoeff*peakLoc*self.sampleRate/self.fftLen + (1-self.avgCoeff)*self.peak
 
-        return peakLoc*self.sampleRate/self.fftLen
+        return self.peak, power
 
     def interpPeak(self, Pxx, index):
 
@@ -71,8 +74,8 @@ class Tuner:
         offset = (y3-y1)/(y1 + y2 + y3)
 
         peakLoc = index + offset
-
-        return peakLoc
+        power = (y1 + y2 + y3)/3.0
+        return peakLoc,power
 
     def combineHarmonics(self, Pxx):
 
@@ -95,11 +98,11 @@ def main():
 
     testFreq = args.freq
     x1=np.cos(2.0*np.pi*(testFreq/sampleRate)*np.arange(0,sampleRate-1));
-    x2=2.0*np.cos(2.0*np.pi*(testFreq*2./sampleRate)*np.arange(0,sampleRate-1));
-    x3=3.0*np.cos(2.0*np.pi*(testFreq*3./sampleRate)*np.arange(0,sampleRate-1));
+    x2=1.0*np.cos(2.0*np.pi*(testFreq*2./sampleRate)*np.arange(0,sampleRate-1));
+    x3=1.0*np.cos(2.0*np.pi*(testFreq*3./sampleRate)*np.arange(0,sampleRate-1));
     x = x1+x2+x3
-    peak = t.run(x)
-    print("Peak at %f Hz"%peak)
+    peak, power = t.run(x)
+    print("Peak at %f Hz %f"%(peak,10*np.log10(power)))
 
 if __name__ == "__main__":
     main()
