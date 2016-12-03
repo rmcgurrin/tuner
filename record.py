@@ -58,5 +58,5 @@ t = Tuner(sampleRate=RATE,startFreq=50,stopFreq=1200)
 while True:
     data = stream.read(CHUNK)
     data_d = decode(data, CHANNELS)
-    peak, power = t.run(data_d[:,0])
+    peak, power = t.processSamples(data_d[:,0])
     print("Peak at %f Hz "%(peak))
