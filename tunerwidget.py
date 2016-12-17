@@ -58,15 +58,11 @@ class CompassWidget(QWidget):
         painter.scale(scale, scale)
         painter.setPen(QPen(Qt.NoPen))
         painter.setBrush(QColor(255,0,0))
-
         painter.drawPolygon(
-            QPolygon([QPoint(-1, 0), QPoint(0, -40), QPoint(1, 0)])
-            )
-
+            QPolygon([QPoint(-1, 0), QPoint(0, -40), QPoint(1, 0)]))
         painter.restore()
 
     def sizeHint(self):
-
         return QSize(2000, 2000)
 
     @pyqtProperty(float)
@@ -80,7 +76,6 @@ class CompassWidget(QWidget):
             self._angle = temp
             self.angleChanged.emit(temp)
             self.update()
-
 
 class Worker(QThread):
 
@@ -97,7 +92,6 @@ class Worker(QThread):
             print("Angle %d"%(self.angle))
             self.angleChanged.emit(self.angle)
             time.sleep(.1);
-
 
 if __name__ == "__main__":
 

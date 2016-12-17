@@ -10,7 +10,7 @@ import pyaudio
 
 class BandPassFilter:
 
-    def __init__(self,startFreq=50.0,stopFreq=1200.0,order=5,sampleRate=8000.0):
+    def __init__(self,startFreq=30.0,stopFreq=1200.0,order=5,sampleRate=8000.0):
 
         nyquist = sampleRate/2.0
         low = startFreq/nyquist
@@ -28,7 +28,8 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=8000,startFreq=50,stopFreq=1200,fftLen=4096):
+    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=4096,
+        dbgTimeStart=0.,dbgTimeLen=0.):
 
         self.sampleRate = sampleRate
         self.fftLen = fftLen
@@ -37,10 +38,13 @@ class Tuner:
         self.avgCoeff = 1.
         self.blockSize = 1*fftLen
 
+        self.dbgTimeStart = dbgTimeStart
+        self.dbgTimeLen = dbgTimeLen
+
     def readStream(self):
         sampleType = pyaudio.paInt16
         channels = 2
-        sampleRate = 22050
+        sampleRate = 44100
 
         # start Recording
         audio = pyaudio.PyAudio()
@@ -73,63 +77,98 @@ class Tuner:
         sample = []
         ploc = []
         pwr =[]
+
         while sampleCount + self.blockSize < numSamples:
             x = d[sampleCount:sampleCount+self.blockSize-1,0]
-            p, power = self.processSamples(x)
+            #p, power = self.processSamples_hps(x)
+            p, power = self.processSamples_autocorr(x)
             ploc.append(p)
             pwr.append(power)
             sample.append(sampleCount/self.sampleRate)
-            sampleCount += self.blockSize
+            sampleCount += self.blockSize/4
 
             time = sampleCount/self.sampleRate
-            if time < 19.8 and time > 19.6:
+
+            if time > self.dbgTimeStart and time < self.dbgTimeStart + self.dbgTimeLen:
+
                 print(time,p)
                 plt.figure()
                 plt.plot(x)
 
-                plt.figure()
-                plt.plot(self.f,10*np.log10(self.Pxx))
+                #plt.figure()
+                #plt.plot(self.f,10*np.log10(self.Pxx))
+
+                #plt.figure()
+                #plt.plot(self.f,10*np.log10(self.PxxH))
+
+                #plt.figure()
+                #pxx = np.fft.ifft(self.Pxx)
+                #t=np.arange(0,(self.fftLen/2)+1)/(self.sampleRate/2)
+                #plt.plot(t,pxx)
+
 
                 plt.figure()
-                plt.plot(self.f,10*np.log10(self.PxxH))
-
-                plt.figure()
-                pxx = np.fft.ifft(self.Pxx)
-                t=np.arange(0,(self.fftLen/2)+1)/(self.sampleRate/2)
-                plt.plot(t,pxx)
-
-                plt.figure()
-                X = np.abs(np.fft.rfft(x))
-                plt.plot(X)
+                plt.plot(self.xx)
                 plt.show()
 
         fig, ax1 = plt.subplots()
-        ax1.plot(sample,ploc,'r-*')
+        ax1.plot(sample,ploc,'r*')
         ax2 = ax1.twinx()
-        ax2.plot(sample,pwr,'b-*')
+        ax2.plot(sample,pwr,'b')
         plt.show()
 
-
-    def processSamples(self, x):
+    def processSamples_hps(self, x):
 
         # bandpass filter the signal
-        y = self.bp.filter(x)
+        #y = self.bp.filter(x)
+        y = x;
 
         # estimate the power spectrum of the signal
         self.f,self.Pxx = signal.periodogram(y,self.sampleRate,window='hanning',nfft=self.fftLen,scaling='spectrum')
 
         # create the harmonic spectrum
-        self.PxxH = self.combineHarmonics(self.Pxx)
-        fundamental = np.argmax(self.PxxH[0:len(self.PxxH)/3])
+        self.PxxH = self.harmonicProductSpectrum(self.Pxx)
+        fundamental = np.argmax(self.PxxH[0:np.uint16(len(self.PxxH)/3)])
 
         # estimate the peak frequency
         peakLoc, power = self.interpPeak(self.Pxx,fundamental)
         power = 10*np.log10(power)
-        if power < -50.0:
+        if power < -60.0:
             peakLoc = 0
         else:
             peakLoc *= self.sampleRate/self.fftLen
 
+        return peakLoc, power
+
+    def processSamples_autocorr(self, x):
+
+        X = np.fft.fft(x)
+        freq = np.fft.fftfreq(len(X), 1/self.sampleRate)
+        i = freq > 0
+
+        #plt.figure()
+        #plt.plot(freq[i],np.abs(X[i]))
+
+        XX = X*X.conj()
+        xx = np.fft.ifft(XX).real
+        self.xx = xx
+        tt = np.argmax(xx[100:600])
+        tt += 100
+
+        print('Period',tt)
+
+        #plt.figure()
+        #plt.plot(xx)
+        #plt.show()
+
+        peakLoc = self.sampleRate/tt
+        power = np.sum(x**2)/len(x)
+        power = 10.*np.log10(power)
+        if power < -40.:
+            peakLoc = 0
+        peakPower = 10*np.log10(np.max(x**2))
+        if( peakPower > power + 10):
+            peakLoc = 0
         return peakLoc, power
 
     def interpPeak(self, Pxx, index):
@@ -139,15 +178,14 @@ class Tuner:
         y3 = Pxx[index+1]
 
         offset = (y3-y1)/(y1 + y2 + y3)
-
         peakLoc = index + offset
         power = (y1 + y2 + y3)/3.0
         return peakLoc,power
 
-    def combineHarmonics(self, Pxx):
+    def harmonicProductSpectrum(self, Pxx):
 
         temp = np.copy(Pxx)
-        for level in (2,3):
+        for level in (2,3,4,5):
             N = np.int(len(Pxx)/level)
             for index in np.arange(0,N):
                 temp[index] *= Pxx[index*level]
@@ -165,9 +203,11 @@ def main():
     parser.add_argument('--file', help='wave file name')
     parser.add_argument('--stream', action='store_true',help='get samples from mic')
     parser.add_argument('--test', action='store_true',help='run test waveform')
+    parser.add_argument('--dbgtime', help='timestamp used for debugging', type = float, default = 0. )
+    parser.add_argument('--dbglen', help=' duration of time for debug', type = float, default = 0. )
     args = parser.parse_args()
 
-    t = Tuner()
+    t = Tuner(dbgTimeStart = args.dbgtime, dbgTimeLen = args.dbglen)
 
     if args.file:
         t.readWave(args.file)
