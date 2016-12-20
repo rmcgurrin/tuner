@@ -7,15 +7,17 @@ from scipy import signal
 import argparse
 import wave
 import pyaudio
+from agc import AGC
 
 class BandPassFilter:
 
-    def __init__(self,startFreq=30.0,stopFreq=1200.0,order=5,sampleRate=8000.0):
+    def __init__(self,startFreq=0.0,stopFreq=1200.0,order=3,sampleRate=44100.0):
 
         nyquist = sampleRate/2.0
         low = startFreq/nyquist
         high = stopFreq/nyquist
-        b, a = signal.butter(order, [low, high], btype='bandpass')
+        #b, a = signal.butter(order, [low, high], btype='bandpass')
+        b, a = signal.butter(order, high)
 
         self.a = a
         self.b = b
@@ -28,18 +30,22 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=4096,
+    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=512,
         dbgTimeStart=0.,dbgTimeLen=0.):
 
         self.sampleRate = sampleRate
         self.fftLen = fftLen
-        self.bp = BandPassFilter(sampleRate=8000,startFreq=50,stopFreq=1200)
+        self.filt = BandPassFilter(sampleRate=8000,startFreq=50,stopFreq=1200)
         self.peak = 0.0;
         self.avgCoeff = 1.
         self.blockSize = 1*fftLen
 
         self.dbgTimeStart = dbgTimeStart
         self.dbgTimeLen = dbgTimeLen
+
+        self.agc = AGC()
+
+
 
     def readStream(self):
         sampleType = pyaudio.paInt16
@@ -85,7 +91,7 @@ class Tuner:
             ploc.append(p)
             pwr.append(power)
             sample.append(sampleCount/self.sampleRate)
-            sampleCount += self.blockSize/4
+            sampleCount += self.blockSize/1
 
             time = sampleCount/self.sampleRate
 
@@ -108,7 +114,7 @@ class Tuner:
 
 
                 plt.figure()
-                plt.plot(self.xx)
+                #plt.plot(self.xx)
                 plt.show()
 
         fig, ax1 = plt.subplots()
@@ -120,20 +126,22 @@ class Tuner:
     def processSamples_hps(self, x):
 
         # bandpass filter the signal
-        #y = self.bp.filter(x)
-        y = x;
+        x = self.filt.filter(x)
+        x = self.agc.run(x)
+
+        power = np.sum(x**2)/len(x)
+        power = 10.*np.log10(power)
 
         # estimate the power spectrum of the signal
-        self.f,self.Pxx = signal.periodogram(y,self.sampleRate,window='hanning',nfft=self.fftLen,scaling='spectrum')
+        self.f,self.Pxx = signal.periodogram(x,self.sampleRate,window='hanning',nfft=self.fftLen,scaling='spectrum')
 
         # create the harmonic spectrum
         self.PxxH = self.harmonicProductSpectrum(self.Pxx)
         fundamental = np.argmax(self.PxxH[0:np.uint16(len(self.PxxH)/3)])
 
         # estimate the peak frequency
-        peakLoc, power = self.interpPeak(self.Pxx,fundamental)
-        power = 10*np.log10(power)
-        if power < -60.0:
+        peakLoc, peakPower = self.interpPeak(self.Pxx,fundamental)
+        if power < -3. or power > 3.0:
             peakLoc = 0
         else:
             peakLoc *= self.sampleRate/self.fftLen
@@ -141,6 +149,16 @@ class Tuner:
         return peakLoc, power
 
     def processSamples_autocorr(self, x):
+
+        x = self.filt.filter(x)
+        x = self.agc.run(x)
+
+        power = np.sum(x**2)/len(x)
+        power = 10.*np.log10(power)
+
+        # run the automatic gain control algorithm to normalize the signal level
+        # this should improve detecting the fundamental frequency in the
+        # autocorrelation sequence
 
         X = np.fft.fft(x)
         freq = np.fft.fftfreq(len(X), 1/self.sampleRate)
@@ -155,19 +173,8 @@ class Tuner:
         tt = np.argmax(xx[100:600])
         tt += 100
 
-        print('Period',tt)
-
-        #plt.figure()
-        #plt.plot(xx)
-        #plt.show()
-
         peakLoc = self.sampleRate/tt
-        power = np.sum(x**2)/len(x)
-        power = 10.*np.log10(power)
-        if power < -40.:
-            peakLoc = 0
-        peakPower = 10*np.log10(np.max(x**2))
-        if( peakPower > power + 10):
+        if power < -3. or power > 3.0:
             peakLoc = 0
         return peakLoc, power
 
