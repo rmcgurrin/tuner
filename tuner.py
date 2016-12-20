@@ -30,40 +30,42 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=2048,
-        dbgTimeStart=0.,dbgTimeLen=0.):
+    def __init__(self, sampleRate=44100,startFreq=10,stopFreq=1200,fftLen=4096,
+        dbgTimeStart=0.,dbgTimeLen=0.,blockSize=320):
 
         self.sampleRate = sampleRate
         self.fftLen = fftLen
-        self.filt = BandPassFilter(sampleRate=8000,startFreq=50,stopFreq=1200)
-        self.peak = 0.0;
+        self.peak = 0.0
         self.avgCoeff = 1.
-        self.blockSize = 1*fftLen
+        self.blockSize = blockSize
 
         self.dbgTimeStart = dbgTimeStart
         self.dbgTimeLen = dbgTimeLen
 
         self.agc = AGC()
 
+        self.stringFreqHi = 350.0
+        self.stringFreqLo = 50.0
 
 
     def readStream(self):
         sampleType = pyaudio.paInt16
         channels = 2
-        sampleRate = 44100
+        self.sampleRate = 8000
+        self.filt = BandPassFilter(sampleRate=self.sampleRate);
 
-        # start Recording
+        # start streaming samples from the soundcard
         audio = pyaudio.PyAudio()
         stream = audio.open(format=pyaudio.paInt16, channels=1,
-                        rate=sampleRate, input=True,
+                        rate=self.sampleRate, input=True,
                         frames_per_buffer=self.blockSize)
 
         while True:
             data = stream.read(self.blockSize)
             data_d = np.fromstring(data, dtype=np.int16)
             data_d = np.reshape(data_d, (self.blockSize, 1))
-            peak, power = self.processSamples(data_d[:,0])
-            print(peak)
+            peak, power = self.processSamples_autocorr(data_d[:,0]/32768.)
+            print(peak,power)
 
     def readWave(self, filename):
 
@@ -84,6 +86,8 @@ class Tuner:
         ploc = []
         pwr =[]
 
+        self.filt = BandPassFilter(sampleRate=self.sampleRate);
+
         while sampleCount + self.blockSize < numSamples:
             x = d[sampleCount:sampleCount+self.blockSize-1,0]
             #p, power = self.processSamples_hps(x)
@@ -91,7 +95,7 @@ class Tuner:
             ploc.append(p)
             pwr.append(power)
             sample.append(sampleCount/self.sampleRate)
-            sampleCount += self.blockSize/1
+            sampleCount += self.blockSize
 
             time = sampleCount/self.sampleRate
 
@@ -111,7 +115,6 @@ class Tuner:
                 #pxx = np.fft.ifft(self.Pxx)
                 #t=np.arange(0,(self.fftLen/2)+1)/(self.sampleRate/2)
                 #plt.plot(t,pxx)
-
 
                 plt.figure()
                 #plt.plot(self.xx)
@@ -160,22 +163,36 @@ class Tuner:
         # this should improve detecting the fundamental frequency in the
         # autocorrelation sequence
 
-        X = np.fft.fft(x)
+        X = np.fft.fft(x,n=self.fftLen)
         freq = np.fft.fftfreq(len(X), 1/self.sampleRate)
         i = freq > 0
 
         #plt.figure()
         #plt.plot(freq[i],np.abs(X[i]))
-
         XX = X*X.conj()
-        xx = np.fft.ifft(XX).real
+        xx = np.fft.ifft(XX,n=self.fftLen).real
         self.xx = xx
-        tt = np.argmax(xx[100:600])
-        tt += 100
 
-        peakLoc = self.sampleRate/tt
+        # determine the range to search in the autocorr sequence
+        hi = np.int(self.sampleRate/self.stringFreqLo)
+        lo = np.int(self.sampleRate/self.stringFreqHi)
+        tt = np.argmax(xx[lo:hi])
+        tt += lo
+
+        peakLoc = self.sampleRate/(tt)
         if power < -3. or power > 3.0:
             peakLoc = 0
+        elif peakLoc < 300:
+            pass
+
+            print(lo,hi)
+            plt.figure()
+            plt.plot(x)
+            plt.figure()
+            plt.plot(xx)
+            plt.show()
+
+
         return peakLoc, power
 
     def interpPeak(self, Pxx, index):
