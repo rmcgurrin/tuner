@@ -30,7 +30,7 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=512,
+    def __init__(self, sampleRate=8000,startFreq=10,stopFreq=1200,fftLen=2048,
         dbgTimeStart=0.,dbgTimeLen=0.):
 
         self.sampleRate = sampleRate
