@@ -8,6 +8,18 @@ import argparse
 import wave
 import pyaudio
 from agc import AGC
+from collections import OrderedDict
+
+noteFreqs=OrderedDict(
+    [
+        ('E4',329.63),
+        ('B3',246.94),
+        ('G3',196.00),
+        ('D3',146.83),
+        ('A2',110.00),
+        ('E2',82.41)
+    ]
+)
 
 class BandPassFilter:
 
@@ -30,8 +42,8 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=44100,startFreq=10,stopFreq=1200,fftLen=4096,
-        dbgTimeStart=0.,dbgTimeLen=0.,blockSize=320):
+    def __init__(self, sampleRate=44100,startFreq=10,stopFreq=1200,fftLen=8192,
+        dbgTimeStart=0.,dbgTimeLen=0.,blockSize=1024,note='E2'):
 
         self.sampleRate = sampleRate
         self.fftLen = fftLen
@@ -44,15 +56,16 @@ class Tuner:
 
         self.agc = AGC()
 
-        self.stringFreqHi = 350.0
-        self.stringFreqLo = 50.0
+        self.note = note
+
+        self.power = 0;
 
 
     def readStream(self):
         sampleType = pyaudio.paInt16
         channels = 2
         self.sampleRate = 8000
-        self.filt = BandPassFilter(sampleRate=self.sampleRate);
+        self.filt = BandPassFilter(sampleRate=self.sampleRate,stopFreq=noteFreqs[self.note]);
 
         # start streaming samples from the soundcard
         audio = pyaudio.PyAudio()
@@ -86,7 +99,7 @@ class Tuner:
         ploc = []
         pwr =[]
 
-        self.filt = BandPassFilter(sampleRate=self.sampleRate);
+        self.filt = BandPassFilter(sampleRate=self.sampleRate,stopFreq=noteFreqs[self.note]*2.);
 
         while sampleCount + self.blockSize < numSamples:
             x = d[sampleCount:sampleCount+self.blockSize-1,0]
@@ -117,13 +130,16 @@ class Tuner:
                 #plt.plot(t,pxx)
 
                 plt.figure()
-                #plt.plot(self.xx)
+                plt.plot(self.xx)
                 plt.show()
 
         fig, ax1 = plt.subplots()
         ax1.plot(sample,ploc,'r*')
         ax2 = ax1.twinx()
         ax2.plot(sample,pwr,'b')
+        temp = np.array(pwr)
+        temp = np.append(temp,0)
+        ax2.plot(sample,np.abs(np.diff(temp)),'g')
         plt.show()
 
     def processSamples_hps(self, x):
@@ -153,15 +169,14 @@ class Tuner:
 
     def processSamples_autocorr(self, x):
 
-        x = self.filt.filter(x)
-        x = self.agc.run(x)
-
         power = np.sum(x**2)/len(x)
         power = 10.*np.log10(power)
 
         # run the automatic gain control algorithm to normalize the signal level
         # this should improve detecting the fundamental frequency in the
         # autocorrelation sequence
+        #x = self.agc.run(x)
+        #x = self.filt.filter(x)
 
         X = np.fft.fft(x,n=self.fftLen)
         freq = np.fft.fftfreq(len(X), 1/self.sampleRate)
@@ -174,24 +189,21 @@ class Tuner:
         self.xx = xx
 
         # determine the range to search in the autocorr sequence
-        hi = np.int(self.sampleRate/self.stringFreqLo)
-        lo = np.int(self.sampleRate/self.stringFreqHi)
+        stringFreqLo = noteFreqs[self.note]*2**(-2/12)
+        stringFreqHi = noteFreqs[self.note]*2**(2/12)
+        hi = np.int(self.sampleRate/stringFreqLo)
+        lo = np.int(self.sampleRate/stringFreqHi)
         tt = np.argmax(xx[lo:hi])
         tt += lo
 
         peakLoc = self.sampleRate/(tt)
-        if power < -3. or power > 3.0:
+        #if power < -10. or power > 2.0:
+        if power < -40.:
             peakLoc = 0
-        elif peakLoc < 300:
-            pass
 
-            print(lo,hi)
-            plt.figure()
-            plt.plot(x)
-            plt.figure()
-            plt.plot(xx)
-            plt.show()
-
+        if np.abs(power - self.power) > 5:
+            peakLoc = 0
+        self.power = power
 
         return peakLoc, power
 
@@ -229,9 +241,10 @@ def main():
     parser.add_argument('--test', action='store_true',help='run test waveform')
     parser.add_argument('--dbgtime', help='timestamp used for debugging', type = float, default = 0. )
     parser.add_argument('--dbglen', help=' duration of time for debug', type = float, default = 0. )
+    parser.add_argument('--note', help=' note pitch', default = 'E4' )
     args = parser.parse_args()
 
-    t = Tuner(dbgTimeStart = args.dbgtime, dbgTimeLen = args.dbglen)
+    t = Tuner(dbgTimeStart = args.dbgtime, dbgTimeLen = args.dbglen, note=args.note)
 
     if args.file:
         t.readWave(args.file)
