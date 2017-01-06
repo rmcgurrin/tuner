@@ -4,6 +4,8 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 from scipy import signal
+from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 import argparse
 import wave
 import pyaudio
@@ -42,7 +44,7 @@ class BandPassFilter:
 
 class Tuner:
 
-    def __init__(self, sampleRate=44100,startFreq=10,stopFreq=1200,fftLen=8192,
+    def __init__(self, sampleRate=44100,startFreq=10,stopFreq=1200,fftLen=4096,
         dbgTimeStart=0.,dbgTimeLen=0.,blockSize=1024,note='E2'):
 
         self.sampleRate = sampleRate
@@ -131,6 +133,7 @@ class Tuner:
 
                 plt.figure()
                 plt.plot(self.xx)
+                plt.plot(self.fit_range, self.xx_fit)
                 plt.show()
 
         fig, ax1 = plt.subplots()
@@ -167,6 +170,9 @@ class Tuner:
 
         return peakLoc, power
 
+    def peak_fit(self,x,a,b,c):
+        return a*x**2 + b*x +c
+
     def processSamples_autocorr(self, x):
 
         power = np.sum(x**2)/len(x)
@@ -196,13 +202,26 @@ class Tuner:
         tt = np.argmax(xx[lo:hi])
         tt += lo
 
-        peakLoc = self.sampleRate/(tt)
-        #if power < -10. or power > 2.0:
-        if power < -40.:
+        #fit a parabola to interpolate the peak
+        xdata = np.arange(-10,10)
+        popt,_ = curve_fit(self.peak_fit, xdata, xx[tt+xdata])
+        self.fit_range = np.arange(-10,9,.1)
+        self.xx_fit = self.peak_fit(self.fit_range,popt[0],popt[1],popt[2])
+        fit_peak_loc = np.argmax(self.xx_fit)
+        peakLoc = self.sampleRate/(self.fit_range[fit_peak_loc]+tt)
+
+        if fit_peak_loc+1 >= len(self.xx_fit):
+            peakLoc = 0
+        elif self.xx_fit[fit_peak_loc] < self.xx_fit[fit_peak_loc+1]:
             peakLoc = 0
 
+        if power < -50.:
+            peakLoc = 0
+
+        #only use parts of the waveform where its not rising too quickly
         if np.abs(power - self.power) > 5:
             peakLoc = 0
+
         self.power = power
 
         return peakLoc, power
