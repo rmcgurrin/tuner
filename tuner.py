@@ -11,6 +11,7 @@ import wave
 import pyaudio
 from agc import AGC
 from collections import OrderedDict
+from filterpy.gh import GHFilter
 
 noteFreqs=OrderedDict(
     [
@@ -61,6 +62,9 @@ class Tuner:
         self.note = note
 
         self.power = 0;
+        self.tracker = GHFilter(x=noteFreqs[note], dx=0, dt=1., g=.05, h=.005)
+
+        self.trackLoc = []
 
 
     def readStream(self):
@@ -138,11 +142,17 @@ class Tuner:
 
         fig, ax1 = plt.subplots()
         ax1.plot(sample,ploc,'r*')
+        ax1.plot(sample,self.trackLoc,'r')
         ax2 = ax1.twinx()
         ax2.plot(sample,pwr,'b')
         temp = np.array(pwr)
         temp = np.append(temp,0)
         ax2.plot(sample,np.abs(np.diff(temp)),'g')
+
+        plt.figure()
+        cents = 1200*np.log2(np.array(self.trackLoc)/noteFreqs[self.note])
+        plt.plot(sample,cents)
+
         plt.show()
 
     def processSamples_hps(self, x):
@@ -205,10 +215,11 @@ class Tuner:
         #fit a parabola to interpolate the peak
         xdata = np.arange(-10,10)
         popt,_ = curve_fit(self.peak_fit, xdata, xx[tt+xdata])
-        self.fit_range = np.arange(-10,9,.1)
+        self.fit_range = np.arange(-10,9,.01)
         self.xx_fit = self.peak_fit(self.fit_range,popt[0],popt[1],popt[2])
         fit_peak_loc = np.argmax(self.xx_fit)
         peakLoc = self.sampleRate/(self.fit_range[fit_peak_loc]+tt)
+
 
         if fit_peak_loc+1 >= len(self.xx_fit):
             peakLoc = 0
@@ -223,6 +234,15 @@ class Tuner:
             peakLoc = 0
 
         self.power = power
+
+        if peakLoc == 0:
+            self.tracker.update(self.tracker.x)
+            self.tracker.dx = 0
+        else:
+            self.tracker.update(z=peakLoc)
+
+        self.trackLoc.append(self.tracker.x)
+
 
         return peakLoc, power
 
