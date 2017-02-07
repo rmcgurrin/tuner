@@ -31,8 +31,8 @@ class BandPassFilter:
         nyquist = sampleRate/2.0
         low = startFreq/nyquist
         high = stopFreq/nyquist
-        #b, a = signal.butter(order, [low, high], btype='bandpass')
-        b, a = signal.butter(order, high)
+        b, a = signal.butter(order, [low, high], btype='bandpass')
+        #b, a = signal.butter(order, high)
 
         self.a = a
         self.b = b
@@ -154,6 +154,7 @@ class Tuner:
         plt.plot(sample,cents)
 
         plt.show()
+        print('HI')
 
     def processSamples_hps(self, x):
 
@@ -192,7 +193,7 @@ class Tuner:
         # this should improve detecting the fundamental frequency in the
         # autocorrelation sequence
         #x = self.agc.run(x)
-        #x = self.filt.filter(x)
+        x = self.filt.filter(x)
 
         X = np.fft.fft(x,n=self.fftLen)
         freq = np.fft.fftfreq(len(X), 1/self.sampleRate)

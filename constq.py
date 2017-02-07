@@ -6,6 +6,8 @@ import sys
 import argparse
 from collections import OrderedDict
 from scipy import signal
+from scipy.signal import find_peaks_cwt
+from tuner import BandPassFilter
 
 '''
     open    1st fret    2nd fret   3rd fret     4th fret
@@ -27,12 +29,34 @@ String	Frequency	Scientific pitch notation
 
 noteFreqs=OrderedDict(
     [
-        ('E4',329.63),
-        ('B3',246.94),
-        ('G3',196.00),
-        ('D3',146.83),
-        ('A2',110.00),
-        ('E2',82.41)
+        ('E2',  82.41),
+        ('F2',  87.31),
+        ('F2S', 92.50),
+        ('G2',  98.00),
+        ('G2B', 103.83),
+        ('A2',  110.00),
+        ('A2S', 116.54),
+        ('B2',  123.47),
+        ('C3',  130.81),
+        ('C3S', 138.59),
+        ('D3',  146.83),
+        ('D3S', 155.56),
+        ('E3',  164.81),
+        ('F3',  174.61),
+        ('F3S', 185.00),
+        ('G3',  196.00),
+        ('G3S', 207.65),
+        ('A3',  220.00),
+        ('A3S', 233.88),
+        ('B3',  246.94),
+        ('C4',  261.63),
+        ('C4S', 277.18),
+        ('D4',  293.66),
+        ('D4S', 311.13),
+        ('E4',  329.63),
+        ('F4',  349.23),
+        ('F4S', 369.99),
+        ('G4',  392.00)
     ]
 )
 
@@ -53,6 +77,27 @@ noteHarmonics={
     'A2':[],
     'E2':[]
 }
+
+def matchHarmonics(peaks):
+
+    res = None
+    if len(peaks) < 3:
+        return res
+    p = peaks[0:3]
+
+    d_min = 99.
+    note_min = 'E2'
+    notes = noteFreqs.keys()
+    for note in notes:
+        d = np.linalg.norm(p - np.array(noteBins[note]))
+        if d < d_min:
+            d_min = d
+            res = note
+
+    if d_min < 2.0:
+        return res
+    else:
+        return None
 
 def getN(minFreq, maxFreq, bins, fs):
 
@@ -76,6 +121,8 @@ def getHarmonicBins( freq_in, minFreq, binsPerOctave, numBins):
         if bin >= numBins:
             break
         bins.append(bin)
+        if len(bins) >= 3:
+            break
         freq += freq_in
     return(bins)
 
@@ -107,6 +154,29 @@ def slowQ(x, minFreq, maxFreq, bins, fs):
 
     return cq,freqs
 
+def find_peaks(x,width,thresh_dB,snr_dB):
+
+
+    xMax = 20*np.log10(np.max(x));
+    thresh = np.maximum(xMax-30,thresh_dB)
+
+    thresh = 10**(thresh/20)
+    snr = 10**(snr_dB/20)
+    peaks=[]
+    vals=[]
+    for i in range(width,len(x)-width):
+        if x[i] < thresh:
+            continue
+        if x[i] > x[i-1] and x[i] > x[i+1]:
+            if x[i] > x[i-width] and x[i] > x[i+width]:
+                if x[i] > snr*(x[i-width]+x[i+width])/2:
+                    peaks.append(i)
+                    vals.append(x[i])
+    ind = np.argsort(vals)
+
+    return peaks
+
+
 def main():
 
     parser = argparse.ArgumentParser(description='Test the Tuner Class')
@@ -128,70 +198,37 @@ def main():
     d = np.reshape(d, (numSamples,))
     d = d/32768.
 
-
-    b, a = signal.butter(7, noteFreqs[args.note]/(sampleRate/2))
-    d = signal.lfilter(b, a, d)
-    #d=d[0:-1:16]
-    plt.figure()
-    plt.plot(d)
-    plt.show()
-    return
-
-    sampleRate /= 16.
-    numSamples /= 16
-
-    minFreq = noteFreqs[args.note]*.5
-    maxFreq = noteFreqs[args.note]*2
-    binsPerOctave = 1200/5
+    minFreq = 50
+    maxFreq = 1200
+    binsPerOctave = 12
 
     N,freqs = getN(minFreq, maxFreq, binsPerOctave, sampleRate)
-    print(N)
-    print(freqs)
 
-    '''
     for note in noteFreqs.keys():
         bins = getHarmonicBins(noteFreqs[note], minFreq, binsPerOctave, len(N))
         noteBins[note] = bins
         noteHarmonics[note] = bins2freq(bins, minFreq, binsPerOctave)
-        #print(note,bins,'\n')
-        #print(note,noteHarmonics[note],'\n')
-    '''
-
 
     sampleCount = 0
-    #blockSize = np.max(N)
     blockSize = sampleRate
-    print('max:',blockSize)
+
+    filt = BandPassFilter(sampleRate=sampleRate,startFreq=noteFreqs[args.note]*.9,stopFreq=noteFreqs[args.note]*2.5);
 
     while sampleCount + blockSize < numSamples:
-        x = d[sampleCount:sampleCount+blockSize]
-        cq, freqs = slowQ(x, minFreq, maxFreq, binsPerOctave, sampleRate)
         time = sampleCount/sampleRate
-
-        '''
-        power = {}
-        #find the note powers
-        for note in noteFreqs.keys():
-            power[note] = 0
-            cnt = 0
-            for bin in noteBins[note]:
-                power[note] += abs(cq[bin]**2)
-                cnt += 1
-                if cnt == 3:
-                    break
-            power[note] =  10*np.log10(power[note])
-        '''
+        print(time)
+        x = d[sampleCount:sampleCount+blockSize]
+        x = filt.filter(x)
+        cq, freqs = slowQ(x, minFreq, maxFreq, binsPerOctave, sampleRate)
+        peaks = find_peaks(cq,3,-80,6)
+        test = matchHarmonics(peaks)
+        print(test)
 
         if time > args.dbgtime and time < args.dbgtime + args.dbglen:
-            #print(power)
             plt.figure()
-            plt.plot(freqs,20*np.log10(abs(cq)),'b*-')
+            plt.plot(20*np.log10(abs(cq)),'b*-')
             plt.show()
 
-        maxbin = np.argmax(cq[0:(np.int(len(cq)*.75))])
-        print(len(cq),np.int(len(cq)))
-        peakFreq = minFreq*2**(maxbin/binsPerOctave)
-        print('Peak Freq',peakFreq)
         sampleCount += blockSize/4
 
 if __name__ == "__main__":
