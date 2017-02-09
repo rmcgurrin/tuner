@@ -43,26 +43,29 @@ noteFreqs=OrderedDict(
     ]
 )
 
-noteBins={
-    'E4':[],
-    'B3':[],
-    'G3':[],
-    'D3':[],
-    'A2':[],
-    'E2':[]
-}
-
-noteHarmonics={
-    'E4':[],
-    'B3':[],
-    'G3':[],
-    'D3':[],
-    'A2':[],
-    'E2':[]
-}
-
 class NoteFinder:
-    def matchHarmonics(peaks):
+
+    def __init__(self,note,sampleRate):
+
+        self.minFreq = 50
+        self.maxFreq = 1200
+        self.binsPerOctave = 12
+        self.sampleRate = sampleRate
+        self.note = note
+
+        self.N,self.freqs = self.getN()
+        self.numBins = len(self.N)
+
+        self.noteBins={}
+        self.noteHarmonics={}
+
+        for note in noteFreqs.keys():
+            bins = self.getHarmonicBins(noteFreqs[note])
+            self.noteBins[note] = bins
+            self.noteHarmonics[note] = self.bins2freq(bins)
+        print(self.noteBins)
+
+    def matchHarmonics(self,peaks):
 
         res = None
         if len(peaks) < 3:
@@ -73,7 +76,7 @@ class NoteFinder:
         note_min = 'E2'
         notes = noteFreqs.keys()
         for note in notes:
-            d = np.linalg.norm(p - np.array(noteBins[note]))
+            d = np.linalg.norm(p - np.array(self.noteBins[note]))
             if d < d_min:
                 d_min = d
                 res = note
@@ -83,26 +86,26 @@ class NoteFinder:
         else:
             return None
 
-    def getN(minFreq, maxFreq, bins, fs):
+    def getN(self):
 
-        Q= 1/(2**(1/bins)-1)
-        numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
+        Q= 1/(2**(1/self.binsPerOctave)-1)
+        numFreqs = np.ceil(self.binsPerOctave*np.log2(self.maxFreq/self.minFreq))
         numFreqs = np.int(numFreqs)
-        freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
+        freqs = self.minFreq*2**(np.arange(0,numFreqs)/self.binsPerOctave)
         N = np.zeros((numFreqs,),np.int)
         for k in np.arange(0,numFreqs):
-            N[k] = np.round(Q*fs/(minFreq*2**(k/bins)))
+            N[k] = np.round(Q*self.sampleRate/(self.minFreq*2**(k/self.binsPerOctave)))
             N[k] = np.int(N[k])
 
         return N,freqs
 
-    def getHarmonicBins( freq_in, minFreq, binsPerOctave, numBins):
+    def getHarmonicBins(self, freq_in):
 
         bins = []
         freq = freq_in
         while True:
-            bin = np.int(binsPerOctave*np.log2(freq/minFreq))
-            if bin >= numBins:
+            bin = np.int(self.binsPerOctave*np.log2(freq/self.minFreq))
+            if bin >= self.numBins:
                 break
             bins.append(bin)
             if len(bins) >= 3:
@@ -110,24 +113,24 @@ class NoteFinder:
             freq += freq_in
         return(bins)
 
-    def bins2freq(bins,minFreq,binsPerOctave):
+    def bins2freq(self, bins):
         freqs = []
         for bin in bins:
-            f = minFreq*2**(bin/binsPerOctave)
+            f = self.minFreq*2**(bin/self.binsPerOctave)
             freqs.append(f)
         return freqs
 
-    def slowQ(x, minFreq, maxFreq, bins, fs):
-        Q= 1/(2**(1/bins)-1)
+    def slowQ(self, x):
+        Q= 1/(2**(1/self.binsPerOctave)-1)
 
-        numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
+        numFreqs = np.ceil(self.binsPerOctave*np.log2(self.maxFreq/self.minFreq))
         numFreqs = np.int(numFreqs)
 
-        freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
+        freqs = self.minFreq*2**(np.arange(0,numFreqs)/self.binsPerOctave)
 
         cq = np.zeros(freqs.shape,freqs.dtype)
         for k in np.arange(0,numFreqs):
-            N = np.round(Q*fs/(minFreq*2**(k/bins)))
+            N = np.round(Q*self.sampleRate/(self.minFreq*2**(k/self.binsPerOctave)))
             N = np.int(N)
             basis = np.exp( -2*np.pi*1j*Q*np.arange(0,N)/N)
 
@@ -138,8 +141,7 @@ class NoteFinder:
 
         return cq,freqs
 
-    def find_peaks(x,width,thresh_dB,snr_dB):
-
+    def find_peaks(self, x,width,thresh_dB,snr_dB):
 
         xMax = 20*np.log10(np.max(x));
         thresh = np.maximum(xMax-30,thresh_dB)
@@ -159,6 +161,13 @@ class NoteFinder:
         ind = np.argsort(vals)
 
         return peaks
+
+    def findNote(self, x):
+        self.cq, self.freqs = self.slowQ(x)
+        self.peaks = self.find_peaks(self.cq,3,-80,6)
+        test = self.matchHarmonics(self.peaks)
+        return(test)
+
 
 
 def main():
@@ -182,35 +191,24 @@ def main():
     d = np.reshape(d, (numSamples,))
     d = d/32768.
 
-    minFreq = 50
-    maxFreq = 1200
-    binsPerOctave = 12
-
-    N,freqs = getN(minFreq, maxFreq, binsPerOctave, sampleRate)
-
-    for note in noteFreqs.keys():
-        bins = getHarmonicBins(noteFreqs[note], minFreq, binsPerOctave, len(N))
-        noteBins[note] = bins
-        noteHarmonics[note] = bins2freq(bins, minFreq, binsPerOctave)
-
     sampleCount = 0
     blockSize = sampleRate
+
+    nf = NoteFinder(args.note,sampleRate)
 
     filt = BandPassFilter(sampleRate=sampleRate,startFreq=noteFreqs[args.note]*.9,stopFreq=noteFreqs[args.note]*2.5);
 
     while sampleCount + blockSize < numSamples:
         time = sampleCount/sampleRate
-        print(time)
         x = d[sampleCount:sampleCount+blockSize]
         x = filt.filter(x)
-        cq, freqs = slowQ(x, minFreq, maxFreq, binsPerOctave, sampleRate)
-        peaks = find_peaks(cq,3,-80,6)
-        test = matchHarmonics(peaks)
-        print(test)
+
+        test = nf.findNote(x)
+        print(time, test)
 
         if time > args.dbgtime and time < args.dbgtime + args.dbglen:
             plt.figure()
-            plt.plot(20*np.log10(abs(cq)),'b*-')
+            plt.plot(20*np.log10(abs(nf.cq)),'b*-')
             plt.show()
 
         sampleCount += blockSize/4
