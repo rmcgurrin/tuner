@@ -9,24 +9,7 @@ from scipy import signal
 from scipy.signal import find_peaks_cwt
 from tuner import BandPassFilter
 
-'''
-    open    1st fret    2nd fret   3rd fret     4th fret
-6th string  E       F           F♯/G♭      G            G♯/A♭
-5th string	A       A♯/B♭	    B	       C	        C♯/D♭
-4th string	D	    D♯/E♭	    E	       F	        F♯/G♭
-3rd string	G	    G♯/A♭	    A	       A♯/B♭	    B
-2nd string	B	    C	        C♯/D♭	   D	        D♯/E♭
-1st string	E	    F	        F♯/G♭	   G	        G♯/A♭
-
-String	Frequency	Scientific pitch notation
-1 (E)	329.63 Hz	E4
-2 (B)	246.94 Hz	B3
-3 (G)	196.00 Hz	G3
-4 (D)	146.83 Hz	D3
-5 (A)	110.00 Hz	A2
-6 (E)	82.41 Hz	E2
-'''
-
+'Frequencies in xScientific pitch notation'
 noteFreqs=OrderedDict(
     [
         ('E2',  82.41),
@@ -78,103 +61,104 @@ noteHarmonics={
     'E2':[]
 }
 
-def matchHarmonics(peaks):
+class NoteFinder:
+    def matchHarmonics(peaks):
 
-    res = None
-    if len(peaks) < 3:
-        return res
-    p = peaks[0:3]
+        res = None
+        if len(peaks) < 3:
+            return res
+        p = peaks[0:3]
 
-    d_min = 99.
-    note_min = 'E2'
-    notes = noteFreqs.keys()
-    for note in notes:
-        d = np.linalg.norm(p - np.array(noteBins[note]))
-        if d < d_min:
-            d_min = d
-            res = note
+        d_min = 99.
+        note_min = 'E2'
+        notes = noteFreqs.keys()
+        for note in notes:
+            d = np.linalg.norm(p - np.array(noteBins[note]))
+            if d < d_min:
+                d_min = d
+                res = note
 
-    if d_min < 2.0:
-        return res
-    else:
-        return None
+        if d_min < 2.0:
+            return res
+        else:
+            return None
 
-def getN(minFreq, maxFreq, bins, fs):
+    def getN(minFreq, maxFreq, bins, fs):
 
-    Q= 1/(2**(1/bins)-1)
-    numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
-    numFreqs = np.int(numFreqs)
-    freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
-    N = np.zeros((numFreqs,),np.int)
-    for k in np.arange(0,numFreqs):
-        N[k] = np.round(Q*fs/(minFreq*2**(k/bins)))
-        N[k] = np.int(N[k])
+        Q= 1/(2**(1/bins)-1)
+        numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
+        numFreqs = np.int(numFreqs)
+        freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
+        N = np.zeros((numFreqs,),np.int)
+        for k in np.arange(0,numFreqs):
+            N[k] = np.round(Q*fs/(minFreq*2**(k/bins)))
+            N[k] = np.int(N[k])
 
-    return N,freqs
+        return N,freqs
 
-def getHarmonicBins( freq_in, minFreq, binsPerOctave, numBins):
+    def getHarmonicBins( freq_in, minFreq, binsPerOctave, numBins):
 
-    bins = []
-    freq = freq_in
-    while True:
-        bin = np.int(binsPerOctave*np.log2(freq/minFreq))
-        if bin >= numBins:
-            break
-        bins.append(bin)
-        if len(bins) >= 3:
-            break
-        freq += freq_in
-    return(bins)
+        bins = []
+        freq = freq_in
+        while True:
+            bin = np.int(binsPerOctave*np.log2(freq/minFreq))
+            if bin >= numBins:
+                break
+            bins.append(bin)
+            if len(bins) >= 3:
+                break
+            freq += freq_in
+        return(bins)
 
-def bins2freq(bins,minFreq,binsPerOctave):
-    freqs = []
-    for bin in bins:
-        f = minFreq*2**(bin/binsPerOctave)
-        freqs.append(f)
-    return freqs
+    def bins2freq(bins,minFreq,binsPerOctave):
+        freqs = []
+        for bin in bins:
+            f = minFreq*2**(bin/binsPerOctave)
+            freqs.append(f)
+        return freqs
 
-def slowQ(x, minFreq, maxFreq, bins, fs):
-    Q= 1/(2**(1/bins)-1)
+    def slowQ(x, minFreq, maxFreq, bins, fs):
+        Q= 1/(2**(1/bins)-1)
 
-    numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
-    numFreqs = np.int(numFreqs)
+        numFreqs = np.ceil(bins*np.log2(maxFreq/minFreq))
+        numFreqs = np.int(numFreqs)
 
-    freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
+        freqs = minFreq*2**(np.arange(0,numFreqs)/bins)
 
-    cq = np.zeros(freqs.shape,freqs.dtype)
-    for k in np.arange(0,numFreqs):
-        N = np.round(Q*fs/(minFreq*2**(k/bins)))
-        N = np.int(N)
-        basis = np.exp( -2*np.pi*1j*Q*np.arange(0,N)/N)
+        cq = np.zeros(freqs.shape,freqs.dtype)
+        for k in np.arange(0,numFreqs):
+            N = np.round(Q*fs/(minFreq*2**(k/bins)))
+            N = np.int(N)
+            basis = np.exp( -2*np.pi*1j*Q*np.arange(0,N)/N)
 
-        temp = np.zeros((N,),dtype=np.float)
-        xLen = min(N,len(x))
-        temp[0:xLen] = x[0:xLen]*np.hamming(xLen)
-        cq[k]= abs(temp.dot( basis) / N)
+            temp = np.zeros((N,),dtype=np.float)
+            xLen = min(N,len(x))
+            temp[0:xLen] = x[0:xLen]*np.hamming(xLen)
+            cq[k]= abs(temp.dot( basis) / N)
 
-    return cq,freqs
+        return cq,freqs
 
-def find_peaks(x,width,thresh_dB,snr_dB):
+    def find_peaks(x,width,thresh_dB,snr_dB):
 
 
-    xMax = 20*np.log10(np.max(x));
-    thresh = np.maximum(xMax-30,thresh_dB)
+        xMax = 20*np.log10(np.max(x));
+        thresh = np.maximum(xMax-30,thresh_dB)
 
-    thresh = 10**(thresh/20)
-    snr = 10**(snr_dB/20)
-    peaks=[]
-    vals=[]
-    for i in range(width,len(x)-width):
-        if x[i] < thresh:
-            continue
-        if x[i] > x[i-1] and x[i] > x[i+1]:
-            if x[i] > x[i-width] and x[i] > x[i+width]:
-                if x[i] > snr*(x[i-width]+x[i+width])/2:
-                    peaks.append(i)
-                    vals.append(x[i])
-    ind = np.argsort(vals)
+        thresh = 10**(thresh/20)
+        snr = 10**(snr_dB/20)
+        peaks=[]
+        vals=[]
+        for i in range(width,len(x)-width):
+            if x[i] < thresh:
+                continue
+            if x[i] > x[i-1] and x[i] > x[i+1]:
+                if x[i] > x[i-width] and x[i] > x[i+width]:
+                    if x[i] > snr*(x[i-width]+x[i+width])/2:
+                        peaks.append(i)
+                        vals.append(x[i])
+        ind = np.argsort(vals)
 
-    return peaks
+        return peaks
 
 
 def main():
